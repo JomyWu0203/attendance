@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>出勤簡易紀錄</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #edf2f7;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            display: grid;
+            grid-template-columns: 2fr 2.5fr 4fr auto;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: end;
+        }
+        @media (max-width: 768px) {
+            .form-group {
+                grid-template-columns: 1fr;
+            }
+        }
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #4a5568;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        button {
+            background-color: #3182ce;
+            color: white;
+            border: none;
+            padding: 9px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        button:hover {
+            background-color: #2b6cb0;
+        }
+        .btn-export {
+            background-color: #38a169;
+        }
+        .btn-export:hover {
+            background-color: #2f855a;
+        }
+        .btn-delete {
+            background-color: #e53e3e;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+        .btn-delete:hover {
+            background-color: #c53030;
+        }
+        .action-bar {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        .admin-zone {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px dashed #e2e8f0;
+        }
+        .admin-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #718096;
+            margin-bottom: 10px;
+        }
+        .btn-backup {
+            background-color: #805ad5;
+        }
+        .btn-backup:hover {
+            background-color: #6b46c1;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 14px;
+        }
+        th {
+            background-color: #f7fafc;
+            color: #4a5568;
+        }
+        tr:hover {
+            background-color: #f8fafc;
+        }
+        .status-badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-work { background-color: #ebf8ff; color: #2b6cb0; }
+        .status-off { background-color: #edf2f7; color: #4a5568; }
+        .status-missing { background-color: #fff5f5; color: #c53030; }
+        #fileInput { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>出勤簡易紀錄</h2>
+    
+    <div class="form-group">
+        <div>
+            <label for="actionType">狀態</label>
+            <select id="actionType" onchange="toggleMemoPlaceholder()">
+                <option value="上班打卡">上班打卡</option>
+                <option value="下班打卡">下班打卡</option>
+                <option value="中途消失/異常">中途消失/異常</option>
+            </select>
+        </div>
+        <div>
+            <label for="customTime">紀錄時間 (可修改)</label>
+            <input type="datetime-local" id="customTime">
+        </div>
+        <div>
+            <label for="memo">備註說明</label>
+            <input type="text" id="memo" placeholder="有需要再填寫">
+        </div>
+        <div>
+            <button onclick="addRecord()">新增紀錄</button>
+        </div>
+    </div>
+
+    <div class="action-bar">
+        <button class="btn-export" onclick="exportToCSV()">匯出 Excel CSV</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>紀錄時間</th>
+                <th>狀態</th>
+                <th>備註說明</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="recordTableBody">
+            </tbody>
+    </table>
+
+    <div class="admin-zone">
+        <div class="admin-title">🔄 同事請假交接區</div>
+        <div class="action-bar">
+            <button class="btn-backup" onclick="exportBackupJSON()">1. 匯出交接檔 (.json)</button>
+            <button class="btn-backup" onclick="document.getElementById('fileInput').click()">2. 匯入歷史紀錄</button>
+            <input type="file" id="fileInput" accept=".json" onchange="importBackupJSON(event)">
+        </div>
+    </div>
+</div>
+
+<script>
+    // 初始化資料（採用獨立儲存庫空間，避免資料衝突）
+    let records = JSON.parse(localStorage.getItem('attendance_records_final')) || [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        resetTimeInput();
+        renderTable();
+        setInterval(resetTimeInput, 60000); // 每分鐘自動同步當前時間
+    });
+
+    // 重設時間為現在時間
+    function resetTimeInput() {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('customTime').value = now.toISOString().slice(0, 16);
+    }
+
+    // 動態切換提示文字
+    function toggleMemoPlaceholder() {
+        const action = document.getElementById('actionType').value;
+        const memoInput = document.getElementById('memo');
+        if (action === '中途消失/異常') {
+            memoInput.placeholder = '例：王小明 14:00-15:00 不見';
+        } else {
+            memoInput.placeholder = '有需要再填寫';
+        }
+    }
+
+    // 新增紀錄
+    function addRecord() {
+        const actionInput = document.getElementById('actionType');
+        const timeInput = document.getElementById('customTime');
+        const memoInput = document.getElementById('memo');
+
+        const selectedTime = new Date(timeInput.value);
+        const timeString = `${selectedTime.getFullYear()}-${String(selectedTime.getMonth() + 1).padStart(2, '0')}-${String(selectedTime.getDate()).padStart(2, '0')} ${String(selectedTime.getHours()).padStart(2, '0')}:${String(selectedTime.getMinutes()).padStart(2, '0')}:00`;
+
+        const newRecord = {
+            id: Date.now(),
+            time: timeString,
+            action: actionInput.value,
+            memo: memoInput.value.trim() || '-'
+        };
+
+        records.unshift(newRecord);
+        saveToStorage();
+        renderTable();
+
+        memoInput.value = '';
+        resetTimeInput();
+    }
+
+    // 刪除紀錄
+    function deleteRecord(id) {
+        if (confirm('確定要刪除這筆紀錄嗎？')) {
+            records = records.filter(record => record.id !== id);
+            saveToStorage();
+            renderTable();
+        }
+    }
+
+    // 儲存至瀏覽器
+    function saveToStorage() {
+        localStorage.setItem('attendance_records_final', JSON.stringify(records));
+    }
+
+    // 渲染表格
+    function renderTable() {
+        const tbody = document.getElementById('recordTableBody');
+        tbody.innerHTML = '';
+
+        records.forEach(record => {
+            let statusClass = 'status-off';
+            if (record.action === '上班打卡') statusClass = 'status-work';
+            if (record.action === '中途消失/異常') statusClass = 'status-missing';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${record.time}</td>
+                <td><span class="status-badge ${statusClass}">${record.action}</span></td>
+                <td>${record.memo}</td>
+                <td><button class="btn-delete" onclick="deleteRecord(${record.id})">刪除</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // 匯出 CSV (供 Excel 使用)
+    function exportToCSV() {
+        if (records.length === 0) {
+            alert('目前沒有紀錄可供匯出！');
+            return;
+        }
+        let csvContent = "\uFEFF"; 
+        csvContent += "紀錄時間,狀態,備註說明\n";
+        records.forEach(r => {
+            const memo = `"${r.memo.replace(/"/g, '""')}"`;
+            csvContent += `${r.time},${r.action},${memo}\n`;
+        });
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `出勤紀錄_${new Date().toISOString().slice(0,10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // 匯出 JSON 交接檔
+    function exportBackupJSON() {
+        if (records.length === 0) {
+            alert('目前沒有任何歷史紀錄可以匯出交接！');
+            return;
+        }
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(records));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `出勤紀錄交接檔_${new Date().toISOString().slice(0,10)}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.removeChild(downloadAnchor);
+    }
+
+    // 匯入 JSON 檔並智慧合併
+    function importBackupJSON(event) {
+        const input = event.target;
+        const reader = new FileReader();
+        reader.onload = function() {
+            try {
+                const importedRecords = JSON.parse(reader.result);
+                if (Array.isArray(importedRecords)) {
+                    const combined = [...importedRecords, ...records];
+                    const uniqueMap = new Map();
+                    combined.forEach(item => uniqueMap.set(item.id, item));
+                    
+                    records = Array.from(uniqueMap.values());
+                    records.sort((a, b) => b.id - a.id); // 依時間排序
+                    
+                    saveToStorage();
+                    renderTable();
+                    alert(`成功匯入並合併資料！目前共有 ${records.length} 筆紀錄。`);
+                } else {
+                    alert('檔案格式錯誤，無法讀取出勤資料！');
+                }
+            } catch (e) {
+                alert('讀取檔案失敗，請確保上傳的是正確的備份 .json 檔案。');
+            }
+            input.value = ''; 
+        };
+        if (input.files[0]) {
+            reader.readAsText(input.files[0]);
+        }
+    }
+</script>
+
+</body>
+</html>
